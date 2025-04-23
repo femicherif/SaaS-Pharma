@@ -1,26 +1,56 @@
 import streamlit as st
-import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 
-# Titre
-st.title("Assistant Médicament 💊 - Version locale")
+def chercher_rcp(medicament):
+    base_url = "https://base-donnees-publique.medicaments.gouv.fr"
+    search_url = f"{base_url}/index.php?search={medicament}&page=1"
+    response = requests.get(search_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    lien_rcp = soup.find('a', text='RCP')
+    if lien_rcp:
+        rcp_url = base_url + lien_rcp.get('href')
+        rcp_page = requests.get(rcp_url)
+        return rcp_page.text
+    else:
+        return None
 
-# Charger la base de données locale
-@st.cache_data
-def charger_donnees():
-    return pd.read_csv("medicaments.csv")
+def extraire_infos(rcp_text):
+    if not rcp_text:
+        return None, None, None, None
+    soup = BeautifulSoup(rcp_text, 'html.parser')
+    sections = soup.find_all('div', class_='section')
+    indications = ""
+    posologie = ""
+    duree = ""
+    generiques = "À rechercher manuellement (fonction à intégrer plus tard)"
+    for section in sections:
+        titre = section.find('h2')
+        if titre:
+            titre_text = titre.get_text().strip().lower()
+            contenu = section.get_text().strip()
+            if 'indications thérapeutiques' in titre_text:
+                indications = contenu
+            elif 'posologie et mode d’administration' in titre_text:
+                posologie = contenu
+            elif 'durée du traitement' in titre_text:
+                duree = contenu
+    return generiques, indications, posologie, duree
 
-df = charger_donnees()
-
-# Entrée utilisateur
-medicament = st.text_input("Nom du médicament à rechercher :").strip().lower()
-
+st.title("Assistant Médicament 📋")
+medicament = st.text_input("Nom du médicament :")
 if medicament:
-    resultats = df[df['nom'].str.lower() == medicament]
-
-    if not resultats.empty:
-        ligne = resultats.iloc[0]
-        st.subheader("Indications principales :")
-        st.write(ligne['indications'])
-
-        st.subheader("Posologie par jour :")
-        st.write(ligne['posologie'])
+    with st.spinner("Recherche en cours..."):
+        rcp = chercher_rcp(medicament)
+        generiques, indications, posologie, duree = extraire_infos(rcp)
+        if rcp:
+            st.subheader("Indications principales :")
+            st.write(indications or "Non trouvé")
+            st.subheader("Posologie recommandée :")
+            st.write(posologie or "Non trouvée")
+            st.subheader("Durée du traitement :")
+            st.write(duree or "Non précisée")
+            st.subheader("Génériques suggérés :")
+            st.write(generiques)
+        else:
+            st.error("Aucune RCP trouvée pour ce médicament.")
